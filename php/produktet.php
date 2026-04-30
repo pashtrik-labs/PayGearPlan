@@ -1,43 +1,107 @@
 <?php
 session_start();
-require "lidhjaDatabazes.php";
-$guest_id = session_id(); 
+require_once 'lidhjaDatabazes.php';
 
-// --- 1. ACTION: ADD TO CART ---
-if (isset($_POST['add_to_cart'])) {
-    $p_id = $_POST['product_id'];
-    $sasia = $_POST['sasia'];
+// 1. CLASS DEFINITION FOR CART OPERATIONS
+class CartManager {
+    private $db;
+    private $conn;
 
-    $check = $conn->query("SELECT * FROM shporta WHERE session_id='$guest_id' AND product_id='$p_id'");
-    if ($check->num_rows > 0) {
-        $conn->query("UPDATE shporta SET sasia = sasia + $sasia WHERE session_id='$guest_id' AND product_id='$p_id'");
-    } else {
-        $conn->query("INSERT INTO shporta (session_id, product_id, sasia) VALUES ('$guest_id', '$p_id', '$sasia')");
+    public function __construct($db_instance) {
+        $this->db = $db_instance;
+        $this->conn = $this->db->getConnection();
     }
-    header("Location: produktet.php#cart-section");
-    exit();
+
+    public function addToCart($guest_id, $p_id, $sasia) {
+        $stmt_check = $this->conn->prepare("SELECT * FROM shporta WHERE session_id = ? AND product_id = ?");
+        $stmt_check->bind_param("si", $guest_id, $p_id);
+        $stmt_check->execute();
+        $result = $stmt_check->get_result();
+
+        if ($result->num_rows > 0) {
+            $stmt_update = $this->conn->prepare("UPDATE shporta SET sasia = sasia + ? WHERE session_id = ? AND product_id = ?");
+            $stmt_update->bind_param("isi", $sasia, $guest_id, $p_id);
+            $stmt_update->execute();
+            $stmt_update->close();
+        } else {
+            $stmt_insert = $this->conn->prepare("INSERT INTO shporta (session_id, product_id, sasia) VALUES (?, ?, ?)");
+            $stmt_insert->bind_param("sii", $guest_id, $p_id, $sasia);
+            $stmt_insert->execute();
+            $stmt_insert->close();
+        }
+        $stmt_check->close();
+    }
+
+    public function updateQuantity($c_id, $new_qty) {
+        $stmt = $this->conn->prepare("UPDATE shporta SET sasia = ? WHERE id = ?");
+        $stmt->bind_param("ii", $new_qty, $c_id);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    public function deleteFromCart($remove_id) {
+        $stmt = $this->conn->prepare("DELETE FROM shporta WHERE id = ?");
+        $stmt->bind_param("i", $remove_id);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    public function getAllProducts() {
+        return $this->conn->query("SELECT * FROM products");
+    }
+
+    public function getCartItems($guest_id) {
+        $query = "SELECT shporta.*, products.emri, products.cmimi 
+                  FROM shporta 
+                  JOIN products ON shporta.product_id = products.id 
+                  WHERE shporta.session_id = ?";
+        
+        $stmt = $this->conn->prepare($query);
+        $stmt->bind_param("s", $guest_id);
+        $stmt->execute();
+        return $stmt->get_result();
+    }
+    
+    // Close connection method to prevent resource leaks
+    public function closeConnection() {
+        if ($this->conn) {
+            $this->conn->close();
+        }
+    }
 }
 
-// --- 2. ACTION: UPDATE QUANTITY ---
-if (isset($_POST['update_cart'])) {
-    $c_id = $_POST['cart_id'];
-    $new_qty = $_POST['new_qty'];
-    $conn->query("UPDATE shporta SET sasia = '$new_qty' WHERE id = '$c_id'");
-    header("Location: produktet.php#cart-section");
-    exit();
+// 2. INITIALIZATION
+$database = new Database();
+$cartManager = new CartManager($database);
+$guest_id = session_id();
+
+// 3. ACTION HANDLERS
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    if (isset($_POST['add_to_cart'])) {
+        $cartManager->addToCart($guest_id, $_POST['product_id'], $_POST['sasia']);
+        $cartManager->closeConnection();
+        header("Location: produktet.php#cart-section");
+        exit();
+    }
+
+    if (isset($_POST['update_cart'])) {
+        $cartManager->updateQuantity($_POST['cart_id'], $_POST['new_qty']);
+        $cartManager->closeConnection();
+        header("Location: produktet.php#cart-section");
+        exit();
+    }
 }
 
-// --- 3. ACTION: DELETE FROM CART ---
 if (isset($_GET['remove'])) {
-    $remove_id = $_GET['remove'];
-    $conn->query("DELETE FROM shporta WHERE id = '$remove_id'");
+    $cartManager->deleteFromCart($_GET['remove']);
+    $cartManager->closeConnection();
     header("Location: produktet.php#cart-section");
     exit();
 }
 
 // FETCH DATA
-$all_products = $conn->query("SELECT * FROM products");
-$cart_items = $conn->query("SELECT shporta.*, products.emri, products.cmimi FROM shporta JOIN products ON shporta.product_id = products.id WHERE shporta.session_id = '$guest_id'");
+$all_products = $cartManager->getAllProducts();
+$cart_items = $cartManager->getCartItems($guest_id);
 ?>
 
 <!DOCTYPE html>
@@ -50,14 +114,14 @@ $cart_items = $conn->query("SELECT shporta.*, products.emri, products.cmimi FROM
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="stylesheet" href="\PayGearPlan\css\style.css">
     <style>
-        html { scroll-behavior: smooth; } /* Makes the jump look nice */
+        html { scroll-behavior: smooth; }
         .cart-container { padding: 5rem 9%; background: #fff; border-top: 2px solid #8B0000; margin-top: 4rem; }
         .cart-table { width: 100%; border-collapse: collapse; font-size: 1.6rem; }
         .cart-table th { background: #f7f7f7; padding: 1.5rem; border: 1px solid #eee; }
         .cart-table td { padding: 1.5rem; text-align: center; border: 1px solid #eee; }
         .qty-input { width: 60px; padding: .5rem; font-size: 1.5rem; text-align: center; }
         .btn-update { background: #8B0000; color: white; padding: .5rem 1rem; border: none; border-radius: .5rem; cursor: pointer; }
-        .btn-update:hover { background: #8B0000; }
+        .btn-update:hover { background: #6b0000; }
         .total-box { font-size: 2.5rem; font-weight: bold; text-align: right; padding: 2rem; color: #130f40; }
     </style>
 </head>
@@ -68,6 +132,7 @@ $cart_items = $conn->query("SELECT shporta.*, products.emri, products.cmimi FROM
     <nav class="navbar"><a href="\PayGearPlan\html\index.html">home</a></nav>
     <div class="icons">
         <a href="#cart-section"><div class="fas fa-shopping-cart"></div></a>
+        <a href="\PayGearPlan\php\login.php"><div class="fas fa-user" id="login-btn"></div></a>
     </div>
 </header>
 
@@ -98,7 +163,6 @@ $cart_items = $conn->query("SELECT shporta.*, products.emri, products.cmimi FROM
         <?php endwhile; ?>
     <?php endif; ?>
 </section>
-
 
 <section class="cart-container" id="cart-section">
     <h1 class="heading"> your <span>cart</span> </h1>
@@ -148,6 +212,7 @@ $cart_items = $conn->query("SELECT shporta.*, products.emri, products.cmimi FROM
     </div>
 </section>
 
+<?php $cartManager->closeConnection(); ?>
 <script src="https://unpkg.com/swiper@7/swiper-bundle.min.js"></script>
 <script src="\PayGearPlan\Projekti ne web 1\js\script.js"></script>
 </body>
