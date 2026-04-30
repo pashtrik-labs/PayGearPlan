@@ -1,17 +1,28 @@
 <?php
 
-$servername = "localhost";
-$connUsername = "root";
-$connPassword = "";
-$dbname = "paygearplanDB";
-$port = 3307;
+class Database {
+    private $servername = "localhost";
+    private $connUsername = "root";
+    private $connPassword = "";
+    private $dbname = "paygearplanDB";
+    private $port = 3308;
+    public $conn;
 
-$conn = mysqli_connect($servername, $connUsername, $connPassword, $dbname, $port);
+    public function getConnection() {
+        $this->conn = null;
 
-if (!$conn) {
-    die("Connection failed: " . mysqli_connect_error());
+        try {
+            $this->conn = new mysqli($this->servername, $this->connUsername, $this->connPassword, $this->dbname, $this->port);
+
+            if ($this->conn->connect_error) {
+                die("Connection failed: " . $this->conn->connect_error);
+            }
+        } catch (Exception $e) {
+            echo "Connection error: " . $e->getMessage();
+        }
+
+        return $this->conn;
+    }
 }
-
-echo "Successfully connected to paygearplanDB on port 3307!";
 
 ?>
