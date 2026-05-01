@@ -6,24 +6,43 @@ if (!isset($_SESSION['admin_auth']) || $_SESSION['admin_auth'] !== true) {
     exit();
 }
 
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    require "lidhjaDatabazes.php";
+require_once "lidhjaDatabazes.php";
 
+class UserAdmin {
+    private $db;
+    private $conn;
+
+    public function __construct($db_instance) {
+        $this->db = $db_instance;
+        $this->conn = $this->db->getConnection();
+    }
+
+    public function addUser($username, $email, $password) {
+        $stmt = $this->conn->prepare("INSERT INTO users (username, email, password, last_login_date) VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
+        $stmt->bind_param("sss", $username, $email, $password);
+
+        if ($stmt->execute()) {
+            $stmt->close();
+            $this->conn->close();
+            header("Location: admin_dashboard.php?msg=created");
+            exit();
+        } else {
+            $error = $stmt->error;
+            $stmt->close();
+            $this->conn->close();
+            echo "Error: " . $error;
+        }
+    }
+}
+
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $username = test_input($_POST['username']);
     $email = test_input($_POST['email']);
     $password = test_input($_POST['password']); // Plain text as requested
 
-    $stmt = $conn->prepare("INSERT INTO users (username, email, password, last_login_date) VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
-    $stmt->bind_param("sss", $username, $email, $password);
-
-    if ($stmt->execute()) {
-        header("Location: admin_dashboard.php?msg=created");
-        exit();
-    } else {
-        echo "Error: " . $stmt->error;
-    }
-    $stmt->close();
-    $conn->close();
+    $database = new Database();
+    $userAdmin = new UserAdmin($database);
+    $userAdmin->addUser($username, $email, $password);
 }
 
 function test_input($data) {
